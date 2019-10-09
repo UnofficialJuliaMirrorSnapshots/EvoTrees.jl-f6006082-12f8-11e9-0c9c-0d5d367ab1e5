@@ -8,7 +8,7 @@ using Revise
 using BenchmarkTools
 using EvoTrees
 using EvoTrees: get_gain, get_edges, binarize, get_max_gain, update_grads!, grow_tree, grow_gbtree, SplitInfo, SplitTrack, Tree, TrainNode, TreeNode, EvoTreeRegressor, predict, predict!, sigmoid
-using EvoTrees: find_bags, find_split_turbo!, update_bags!
+using EvoTrees: find_bags, find_split_turbo!, update_bags!, pred_leaf
 
 # prepare a dataset
 # features = rand(100_000, 100)
@@ -29,6 +29,7 @@ train_size = 0.8
 
 X_train, X_eval = X[𝑖_train, :], X[𝑖_eval, :]
 Y_train, Y_eval = Y[𝑖_train], Y[𝑖_eval]
+𝑖 = collect(1:size(X_train,1))
 
 # set parameters
 params1 = EvoTreeRegressor(
@@ -39,11 +40,11 @@ params1 = EvoTreeRegressor(
     rowsample=1.0, colsample=1.0)
 
 # initial info
-δ, δ² = zeros(size(X, 1)), zeros(size(X, 1))
-𝑤 = ones(size(X, 1))
-pred = zeros(size(Y, 1))
+δ, δ² = zeros(size(X_train, 1)), zeros(size(X_train, 1))
+𝑤 = ones(size(X_train, 1))
+pred = zeros(size(Y_train, 1))
 # @time update_grads!(Val{params1.loss}(), pred, Y, δ, δ²)
-update_grads!(params1.loss, params1.α, pred, Y, δ, δ², 𝑤)
+update_grads!(params1.loss, params1.α, pred, Y_train, δ, δ², 𝑤)
 ∑δ, ∑δ², ∑𝑤 = sum(δ), sum(δ²), sum(𝑤)
 gain = get_gain(params1.loss, ∑δ, ∑δ², ∑𝑤, params1.λ)
 
@@ -79,7 +80,10 @@ end
 @time train_nodes[1] = TrainNode(1, ∑δ, ∑δ², ∑𝑤, gain, BitSet(𝑖), 𝑗)
 @time tree = grow_tree(bags, δ, δ², 𝑤, params1, train_nodes, splits, tracks, edges, X_bin)
 @btime tree = grow_tree($bags, $δ, $δ², $𝑤, $params1, $train_nodes, $splits, $tracks, $edges, $X_bin)
+# 21.765 ns (1 allocation: 16 bytes)
+@btime pred_leaf_ = pred_leaf($params1.loss, $train_nodes[1], $params1, $δ²)
 @time pred_train = predict(tree, X_train)
+# 860.199 μs (3 allocations: 625.13 KiB)
 @btime pred_train = predict($tree, $X_train)
 
 params1 = Params(:linear, 5, λ, γ, 1.0, 5, min_weight, rowsample, colsample, nbins)
@@ -122,17 +126,14 @@ end
 #############################################
 
 𝑖_set = BitSet(𝑖);
-@time bags = prep2(X, params1);
+@time bags = prep(X_bin, bags);
 
 feat = 1
 typeof(bags[feat][1])
 train_nodes[1] = TrainNode(1, ∑δ, ∑δ², ∑𝑤, gain, BitSet(𝑖), 𝑗)
-find_split_turbo!(bags[feat], view(X_bin,:,feat), δ, δ², 𝑤, ∑δ, ∑δ², ∑𝑤, params1, splits[feat], tracks[feat], edges[feat], train_nodes[1].𝑖)
-@time find_split_bitset!(bags[1], δ, δ², 𝑤, ∑δ, ∑δ², ∑𝑤, params1, splits[1], tracks[1], edges[1], train_nodes[1].𝑖)
-@btime find_split_bitset!($bags[1], $δ, $δ², $𝑤, $∑δ, $∑δ², $∑𝑤, $params1, $splits[1], $tracks[1], $edges[1], $train_nodes[1].𝑖)
-
-splits[feat]
-
+@time find_split_turbo!(bags[feat], view(X_bin,:,feat), δ, δ², 𝑤, ∑δ, ∑δ², ∑𝑤, params1, splits[feat], tracks[feat], edges[feat], train_nodes[1].𝑖)
+# 482.100 μs (5 allocations: 1.05 KiB)
+@btime find_split_turbo!(bags[feat], view(X_bin,:,feat), δ, δ², 𝑤, ∑δ, ∑δ², ∑𝑤, params1, splits[feat], tracks[feat], edges[feat], train_nodes[1].𝑖)
 
 length(union(train_nodes[1].bags[1][1:13]...))
 length(union(train_nodes[1].bags[1][1:13]...))
