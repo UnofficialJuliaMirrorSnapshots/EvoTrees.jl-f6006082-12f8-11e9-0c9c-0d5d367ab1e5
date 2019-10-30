@@ -3,9 +3,9 @@ function grow_tree(bags::Vector{Vector{BitSet}},
     δ, δ², 𝑤,
     hist_δ, hist_δ², hist_𝑤,
     params::EvoTreeRegressor,
-    train_nodes::Vector{TrainNode{L,T,I,J,S}},
+    train_nodes::Vector{TrainNode{L,T,S}},
     splits::Vector{SplitInfo{L,T,Int}},
-    edges, X_bin) where {R<:Real, T<:AbstractFloat, I<:BitSet, J<:AbstractVector{Int}, S<:Int, L}
+    edges, X_bin) where {R<:Real, T<:AbstractFloat, S<:Int, L}
 
     active_id = ones(Int, 1)
     leaf_count = 1::Int
@@ -21,15 +21,19 @@ function grow_tree(bags::Vector{Vector{BitSet}},
             if tree_depth == params.max_depth || node.∑𝑤[1] <= params.min_weight
                 push!(tree.nodes, TreeNode(pred_leaf(params.loss, node, params, δ²)))
             else
+                set = Int64.(node.𝑖)
                 @threads for feat in node.𝑗
                     splits[feat].gain = node.gain
-                    find_split_static!(hist_δ[feat], hist_δ²[feat], hist_𝑤[feat], bags[feat], view(X_bin,:,feat), δ, δ², 𝑤, node.∑δ, node.∑δ², node.∑𝑤, params, splits[feat], edges[feat], node.𝑖)
+                    find_split_static!(hist_δ[feat], hist_δ²[feat], hist_𝑤[feat], bags[feat], view(X_bin,:,feat), δ, δ², 𝑤, node.∑δ, node.∑δ², node.∑𝑤, params, splits[feat], edges[feat], set)
+                    # update_hist!(hist_δ, hist_δ², hist_𝑤, X_bin, δ, δ², 𝑤, set, feat)
+                    # find_split!(hist_δ[feat], hist_δ²[feat], hist_𝑤[feat], node.∑δ, node.∑δ², node.∑𝑤, params, splits[feat], edges[feat], feat)
                 end
                 # assign best split
                 best = get_max_gain(splits)
                 # grow node if best split improve gain
                 if best.gain > node.gain + params.γ
                     # Node: depth, ∑δ, ∑δ², gain, 𝑖, 𝑗
+                    # set = BitSet(node.𝑖)
                     train_nodes[leaf_count + 1] = TrainNode(node.depth + 1, best.∑δL, best.∑δ²L, best.∑𝑤L, best.gainL, intersect(node.𝑖, union(bags[best.feat][1:best.𝑖]...)), node.𝑗)
                     train_nodes[leaf_count + 2] = TrainNode(node.depth + 1, best.∑δR, best.∑δ²R, best.∑𝑤R, best.gainR, intersect!(node.𝑖, union(bags[best.feat][(best.𝑖+1):end]...)), node.𝑗)
                     # push split Node
@@ -108,7 +112,7 @@ function grow_gbtree(X::AbstractArray{R, 2}, Y::AbstractVector{S}, params::EvoTr
     end
 
     # initialize train nodes
-    train_nodes = Vector{TrainNode{params.K, Float64, BitSet, Array{Int64, 1}, Int64}}(undef, 2^params.max_depth-1)
+    train_nodes = Vector{TrainNode{params.K, Float64, Int64}}(undef, 2^params.max_depth-1)
     for node in 1:2^params.max_depth-1
         train_nodes[node] = TrainNode(0, SVector{params.K, Float64}(fill(-Inf, params.K)), SVector{params.K, Float64}(fill(-Inf, params.K)), SVector{1, Float64}(fill(-Inf, 1)), -Inf, BitSet([0]), [0])
     end
@@ -135,8 +139,8 @@ function grow_gbtree(X::AbstractArray{R, 2}, Y::AbstractVector{S}, params::EvoTr
     # loop over nrounds
     for i in 1:params.nrounds
         # select random rows and cols
-        𝑖 = 𝑖_[sample(𝑖_, ceil(Int, params.rowsample * X_size[1]), replace = false)]
-        𝑗 = 𝑗_[sample(𝑗_, ceil(Int, params.colsample * X_size[2]), replace = false)]
+        𝑖 = 𝑖_[sample(𝑖_, ceil(Int, params.rowsample * X_size[1]), replace=false, ordered=true)]
+        𝑗 = 𝑗_[sample(𝑗_, ceil(Int, params.colsample * X_size[2]), replace=false, ordered=true)]
 
         # reset gain to -Inf
         for feat in 𝑗_
@@ -229,7 +233,7 @@ function grow_gbtree!(model::GBTree, X::AbstractArray{R, 2}, Y::AbstractVector{S
     end
 
     # initialize train nodes
-    train_nodes = Vector{TrainNode{params.K, Float64, BitSet, Array{Int64, 1}, Int64}}(undef, 2^params.max_depth-1)
+    train_nodes = Vector{TrainNode{params.K, Float64, Int64}}(undef, 2^params.max_depth-1)
     for node in 1:2^params.max_depth-1
         train_nodes[node] = TrainNode(0, SVector{params.K, Float64}(fill(-Inf, params.K)), SVector{params.K, Float64}(fill(-Inf, params.K)), SVector{1, Float64}(fill(-Inf, 1)), -Inf, BitSet([0]), [0])
     end
@@ -256,8 +260,8 @@ function grow_gbtree!(model::GBTree, X::AbstractArray{R, 2}, Y::AbstractVector{S
     # loop over nrounds
     for i in 1:params.nrounds
         # select random rows and cols
-        𝑖 = 𝑖_[sample(𝑖_, ceil(Int, params.rowsample * X_size[1]), replace = false)]
-        𝑗 = 𝑗_[sample(𝑗_, ceil(Int, params.colsample * X_size[2]), replace = false)]
+        𝑖 = 𝑖_[sample(𝑖_, ceil(Int, params.rowsample * X_size[1]), replace=false, ordered=true)]
+        𝑗 = 𝑗_[sample(𝑗_, ceil(Int, params.colsample * X_size[2]), replace=false, ordered=true)]
 
         # reset gain to -Inf
         for feat in 𝑗_
